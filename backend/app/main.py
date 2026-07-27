@@ -1,20 +1,73 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
+import logging
 import os
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from .auth_router import router as auth_router
 from .db import init_db, is_enabled, save_parsed_result
 from .era_router import router as era_router
+from .mongo_refresh import init_refresh_store
 from .parser import parse_835_text
 
-app = FastAPI(title="EDI 835 Converter API", version="1.0.0")
+# Make the pipeline package importable regardless of working directory.
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from pipeline import poller  # noqa: E402
+from pipeline.mongo_save import init_era_collection  # noqa: E402
+
+
+_log = logging.getLogger("app.main")
+
+
+async def _run_poller() -> None:
+    try:
+        await poller.run()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        _log.error("Pipeline poller crashed: %s", exc, exc_info=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    try:
+        init_refresh_store()
+    except Exception:
+        pass
+    try:
+        init_era_collection()
+    except Exception:
+        _log.error("Failed to create era_payments unique index", exc_info=True)
+    task = asyncio.create_task(_run_poller())
+    _log.info("Pipeline poller task created — polling every %ss",
+              os.getenv("SFTP_POLL_INTERVAL_SECONDS", "60"))
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    _log.info("Pipeline poller stopped.")
+
+
+app = FastAPI(title="EDI 835 Converter API", version="1.0.0", lifespan=lifespan)
 
 allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:7008,http://127.0.0.1:7008").split(",")
 app.add_middleware(
@@ -26,12 +79,8 @@ app.add_middleware(
 )
 
 
+app.include_router(auth_router)
 app.include_router(era_router)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
 
 
 @app.get("/")
@@ -41,12 +90,14 @@ def root():
         "status": "running",
         "mysql_enabled": is_enabled(),
         "endpoints": [
+            "POST /api/auth/token",
+            "POST /api/auth/refresh",
             "POST /api/edi/parse",
             "POST /api/edi/export/json",
             "POST /api/edi/export/csv",
             "POST /api/edi/export/excel",
             "POST /api/edi/save",
-            "GET  /api/era/lookup?trace_number=...",
+            "GET  /api/era/lookup?trace_number=...  (Bearer access token)",
         ],
     }
 

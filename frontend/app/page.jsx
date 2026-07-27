@@ -2,7 +2,8 @@
 
 import { useMemo, useRef, useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7007';
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
+const apiUrl = (path) => `${API_BASE}${path}`;
 
 const tableColumns = [
   ['transaction_no', 'Tx #'],
@@ -76,7 +77,7 @@ export default function Home() {
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${API_BASE}/api/edi/parse`, { method: 'POST', body: form });
+      const res = await fetch(apiUrl('/api/edi/parse'), { method: 'POST', body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to parse file');
       setParsed(data);
@@ -101,7 +102,7 @@ export default function Home() {
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${API_BASE}/api/edi/export/${format}`, { method: 'POST', body: form });
+      const res = await fetch(apiUrl(`/api/edi/export/${format}`), { method: 'POST', body: form });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || `Failed to export ${format}`);
@@ -130,7 +131,7 @@ export default function Home() {
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${API_BASE}/api/edi/save`, { method: 'POST', body: form });
+      const res = await fetch(apiUrl('/api/edi/save'), { method: 'POST', body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Save failed');
       if (!data.success) {

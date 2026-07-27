@@ -193,6 +193,72 @@ POST /api/edi/save
 
 ---
 
+### External ERA Lookup (JWT — outside team)
+
+Authentication uses **access + refresh tokens** (not static API keys).
+
+#### 1. Get tokens (login)
+
+```http
+POST /api/auth/token
+Content-Type: application/json
+
+{
+  "client_id": "outside_team",
+  "client_secret": "your_secret_here"
+}
+```
+
+Response:
+
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "refresh_expires_in": 86400
+}
+```
+
+- **Access token** — valid 1 hour, use for lookup calls
+- **Refresh token** — valid 1 day, use to renew access token without re-sending secret
+
+#### 2. Refresh access token
+
+```http
+POST /api/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "eyJ..."
+}
+```
+
+Returns a new access token and a new refresh token (rotation). Old refresh token is invalidated.
+
+#### 3. Lookup ERA by trace number
+
+```http
+GET /api/era/lookup?trace_number=1234567890
+Authorization: Bearer <access_token>
+```
+
+Returns normalized ERA JSON for matching documents in MongoDB.
+
+**Configure in `backend/.env`:**
+
+```env
+JWT_SECRET=your_256bit_random_secret_here
+JWT_CLIENTS=outside_team:your_client_secret_here
+JWT_EXPIRE_SECONDS=3600
+JWT_REFRESH_EXPIRE_SECONDS=86400
+```
+
+Expired refresh token records are auto-deleted from MongoDB via a TTL index on `auth_refresh_tokens`.
+
+---
+
 ## 6. Optional MySQL Save Setup
 
 The project works without MySQL. MySQL saving is optional.
@@ -289,9 +355,29 @@ It is not a full HIPAA compliance validator. For production healthcare complianc
 
 ## 9. Quick Test with curl
 
+### Internal EDI parse
+
 ```bash
 curl -X POST http://localhost:7007/api/edi/parse \
   -F "file=@sample-files/sample-redacted.835"
+```
+
+### External ERA lookup (JWT)
+
+```bash
+# Step 1 — get tokens
+curl -X POST http://localhost:7007/api/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"outside_team","client_secret":"YOUR_SECRET"}'
+
+# Step 2 — lookup (replace ACCESS_TOKEN)
+curl -X GET "http://localhost:7007/api/era/lookup?trace_number=1234567890" \
+  -H "Authorization: Bearer ACCESS_TOKEN"
+
+# Step 3 — refresh when access token expires
+curl -X POST http://localhost:7007/api/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"REFRESH_TOKEN"}'
 ```
 
 Download Excel:

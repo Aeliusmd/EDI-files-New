@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
+from .carc_codes import CLAIM_ADJUSTMENT_REASON_CODES, REMITTANCE_ADVICE_REMARK_CODES
+
 CLAIM_STATUS_CODES = {
     "1": "Processed as Primary",
     "2": "Processed as Secondary",
@@ -153,6 +155,9 @@ def parse_cas(e: List[str]) -> List[Dict[str, Any]]:
                     "group_code": group_code,
                     "group": ADJUSTMENT_GROUP_CODES.get(group_code, group_code),
                     "reason_code": reason_code,
+                    "reason_description": CLAIM_ADJUSTMENT_REASON_CODES.get(
+                        str(reason_code).strip(), ""
+                    ),
                     "amount": money(get(e, i + 1)),
                     "quantity": get(e, i + 2) or None,
                 }
@@ -163,16 +168,24 @@ def parse_cas(e: List[str]) -> List[Dict[str, Any]]:
 
 def adjustment_summary(adjustments: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not adjustments:
-        return {"codes": "", "amount": 0.0, "details": ""}
+        return {"codes": "", "amount": 0.0, "details": "", "descriptions": ""}
     codes = []
     amount = 0.0
     details = []
+    descriptions = []
     for adj in adjustments:
         code = f"{adj.get('group_code','')}:{adj.get('reason_code','')}"
         codes.append(code)
         amount += float(adj.get("amount") or 0)
         details.append(f"{code} ${float(adj.get('amount') or 0):.2f}")
-    return {"codes": ", ".join(codes), "amount": round(amount, 2), "details": "; ".join(details)}
+        if adj.get("reason_description"):
+            descriptions.append(adj["reason_description"])
+    return {
+        "codes": ", ".join(codes),
+        "amount": round(amount, 2),
+        "details": "; ".join(details),
+        "descriptions": "; ".join(descriptions),
+    }
 
 
 def new_transaction(control_number: str) -> Dict[str, Any]:
@@ -411,7 +424,14 @@ def parse_835_text(edi_text: str) -> Dict[str, Any]:
             elif current_claim is not None:
                 current_claim.setdefault("quantities", []).append(qty_item)
         elif tag == "LQ":
-            remark = {"qualifier": get(e, 1), "code": get(e, 2)}
+            remark_code = get(e, 2)
+            remark = {
+                "qualifier": get(e, 1),
+                "code": remark_code,
+                "description": REMITTANCE_ADVICE_REMARK_CODES.get(
+                    str(remark_code).strip(), ""
+                ),
+            }
             if current_service is not None:
                 current_service["remarks"].append(remark)
             elif current_claim is not None:
@@ -496,6 +516,7 @@ def build_flat_rows(result: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "service_paid_amount": None,
                         "service_units": None,
                         "service_adjustment_codes": "",
+                        "service_adjustment_description": "",
                         "service_adjustment_amount": 0.0,
                         "service_adjustment_details": "",
                     }
@@ -516,6 +537,7 @@ def build_flat_rows(result: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "service_paid_amount": svc.get("paid_amount"),
                         "service_units": svc.get("units"),
                         "service_adjustment_codes": svc_adj["codes"],
+                        "service_adjustment_description": svc_adj["descriptions"],
                         "service_adjustment_amount": svc_adj["amount"],
                         "service_adjustment_details": svc_adj["details"],
                     }

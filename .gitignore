@@ -4,34 +4,59 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# Environment
+# Environment and secrets
 .env
 .env.*
 !.env.example
 !.env.*.example
+deploy.env
+!deploy.env.example
 
-# Node
+# Node / Next.js
 node_modules/
 .next/
 out/
-.env.local
 dist/
 coverage/
+*.tsbuildinfo
+.eslintcache
 
-# OS
+# Runtime output and downloaded/uploaded data
+logs/
+downloads/
+uploads/
+docs/
+tmp/
+temp/
+*.log
+
+# IDE / local tooling
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS metadata
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Local tooling
-.claude/
-
-# Logs
-*.log
+# Package-manager debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# Generated files
+# Generated exports
 *.xlsx
 *.csv
+
+# Local scratch files
+/aaaaahgshd.png
