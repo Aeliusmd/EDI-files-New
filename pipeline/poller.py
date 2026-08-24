@@ -13,10 +13,19 @@ load_dotenv()
 # Add backend to sys.path so parser is importable without installing the package.
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 from app.parser import parse_835_text  # noqa: E402
+from app.parser_277_999 import (  # noqa: E402
+    parse_277_text,
+    parse_999_text,
+)
 
-from .sftp_client import sftp_connection, list_835_files, download_file
+from .sftp_client import (
+    download_file,
+    list_835_files,
+    list_files_by_extension,
+    sftp_connection,
+)
 from .tracker import init_tracker, is_seen, mark_seen
-from .mongo_save import save_era_file
+from .mongo_save import save_era_file, save_277_file, save_999_file
 
 SFTP_HOST = os.getenv("SFTP_HOST", "Secure.edidrop.com")
 SFTP_PORT = int(os.getenv("SFTP_PORT", "522"))
@@ -44,10 +53,14 @@ def _poll_source(src: dict) -> int:
     """Sync: connect, find new files, download+parse+save. Returns count saved."""
     saved = 0
     with sftp_connection(SFTP_HOST, SFTP_PORT, src["user"], src["pass"]) as sftp:
-        files = list_835_files(sftp, SFTP_REMOTE_PATH)
         save_dir = DOWNLOADS_ROOT / src["name"]
         save_dir.mkdir(parents=True, exist_ok=True)
-        for filename in files:
+
+        files_835 = list_835_files(sftp, SFTP_REMOTE_PATH)
+        files_277 = list_files_by_extension(sftp, SFTP_REMOTE_PATH, {".277"})
+        files_999 = list_files_by_extension(sftp, SFTP_REMOTE_PATH, {".999"})
+
+        for filename in files_835:
             if is_seen(src["name"], filename):
                 continue
             local_path = download_file(sftp, SFTP_REMOTE_PATH, filename, save_dir)
@@ -57,6 +70,28 @@ def _poll_source(src: dict) -> int:
             mark_seen(src["name"], filename)
             saved += count
             logger.info("Saved %d ERA docs from %s/%s", count, src["name"], filename)
+
+        for filename in files_277:
+            if is_seen(src["name"], filename):
+                continue
+            local_path = download_file(sftp, SFTP_REMOTE_PATH, filename, save_dir)
+            text = local_path.read_text(encoding="utf-8", errors="ignore")
+            parsed = parse_277_text(text)
+            count = save_277_file(src["name"], filename, parsed)
+            mark_seen(src["name"], filename)
+            saved += count
+            logger.info("Saved %d 277 claim-status records from %s/%s", count, src["name"], filename)
+
+        for filename in files_999:
+            if is_seen(src["name"], filename):
+                continue
+            local_path = download_file(sftp, SFTP_REMOTE_PATH, filename, save_dir)
+            text = local_path.read_text(encoding="utf-8", errors="ignore")
+            parsed = parse_999_text(text)
+            count = save_999_file(src["name"], filename, parsed)
+            mark_seen(src["name"], filename)
+            saved += count
+            logger.info("Saved %d 999 acknowledgment records from %s/%s", count, src["name"], filename)
     return saved
 
 

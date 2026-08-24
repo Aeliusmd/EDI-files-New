@@ -30,6 +30,19 @@ def list_835_files(sftp: paramiko.SFTPClient, remote_path: str) -> list[str]:
     return [f for f in all_files if f.lower().endswith(".835")]
 
 
+def list_files_by_extension(
+    sftp: paramiko.SFTPClient, remote_path: str, extensions: set[str]
+) -> list[str]:
+    """Return filenames matching any of the given extensions."""
+    try:
+        all_files = sftp.listdir(remote_path)
+    except FileNotFoundError:
+        return []
+
+    exts = {ext.lower() for ext in extensions}
+    return [f for f in all_files if any(f.lower().endswith(ext) for ext in exts)]
+
+
 def download_file(
     sftp: paramiko.SFTPClient,
     remote_path: str,

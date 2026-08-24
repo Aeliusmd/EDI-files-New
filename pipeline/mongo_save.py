@@ -16,14 +16,32 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB = os.getenv("MONGO_DB", "edi835")
 ERA_COLLECTION = "era_payments"
+CLAIM_STATUS_277_COLLECTION = os.getenv(
+    "MONGO_277_COLLECTION", "claim_status_277"
+)
+FUNCTIONAL_ACK_999_COLLECTION = os.getenv(
+    "MONGO_999_COLLECTION", "functional_ack_999"
+)
 
 logger = logging.getLogger("pipeline.mongo_save")
 
 
-def _collection() -> Collection:
+def _collection(collection_name: str) -> Collection:
     client: MongoClient = MongoClient(MONGO_URI)
     db = client[MONGO_DB]
-    return db[ERA_COLLECTION]
+    return db[collection_name]
+
+
+def _era_collection() -> Collection:
+    return _collection(ERA_COLLECTION)
+
+
+def _277_collection() -> Collection:
+    return _collection(CLAIM_STATUS_277_COLLECTION)
+
+
+def _999_collection() -> Collection:
+    return _collection(FUNCTIONAL_ACK_999_COLLECTION)
 
 
 def init_era_collection() -> None:
@@ -36,10 +54,40 @@ def init_era_collection() -> None:
     index turns that race into a rejected duplicate-key error on the second
     insert instead of a silent duplicate ERA document.
     """
-    col = _collection()
+    col = _era_collection()
     col.create_index(
         [("source", ASCENDING), ("source_filename", ASCENDING), ("era_index", ASCENDING)],
         name="unique_era",
+        unique=True,
+        background=True,
+    )
+
+
+def init_277_collection() -> None:
+    """Uniqueness safety net on (source, source_filename, record_index)."""
+    col = _277_collection()
+    col.create_index(
+        [
+            ("source", ASCENDING),
+            ("source_filename", ASCENDING),
+            ("record_index", ASCENDING),
+        ],
+        name="unique_277_record",
+        unique=True,
+        background=True,
+    )
+
+
+def init_999_collection() -> None:
+    """Uniqueness safety net on (source, source_filename, ack_index)."""
+    col = _999_collection()
+    col.create_index(
+        [
+            ("source", ASCENDING),
+            ("source_filename", ASCENDING),
+            ("ack_index", ASCENDING),
+        ],
+        name="unique_999_ack",
         unique=True,
         background=True,
     )
@@ -136,7 +184,7 @@ def save_era_file(source: str, source_filename: str, parsed: dict) -> int:
     file_type: str = parsed.get("file_type", "")
     envelope: dict = parsed.get("envelope", {})
 
-    col = _collection()
+    col = _era_collection()
     docs = []
 
     for era_index, transaction in enumerate(transactions, start=1):
@@ -195,5 +243,93 @@ def save_era_file(source: str, source_filename: str, parsed: dict) -> int:
             "save_era_file: %d duplicate ERA doc(s) rejected by unique index for %s/%s "
             "(concurrent poller instance likely already saved them)",
             len(duplicate_errors), source, source_filename,
+        )
+        return inserted
+
+
+def save_277_file(source: str, source_filename: str, parsed: dict) -> int:
+    """Persist each claim-status record from a parsed 277 file as a Mongo document."""
+    transactions: list[dict] = parsed.get("transactions", [])
+    file_type: str = parsed.get("file_type", "")
+    envelope: dict = parsed.get("envelope", {})
+
+    col = _277_collection()
+    docs: list[dict] = []
+
+    for record_index, record in enumerate(transactions, start=1):
+        doc = {
+            "source": source,
+            "source_filename": source_filename,
+            "record_index": record_index,
+            "imported_at": datetime.now(timezone.utc).isoformat(),
+            "file_type": file_type,
+            "envelope": envelope,
+            "record": record,
+        }
+        docs.append(doc)
+
+    if not docs:
+        return 0
+
+    try:
+        result = col.insert_many(docs, ordered=False)
+        return len(result.inserted_ids)
+    except BulkWriteError as bwe:
+        write_errors = bwe.details.get("writeErrors", [])
+        duplicate_errors = [e for e in write_errors if e.get("code") == 11000]
+        other_errors = [e for e in write_errors if e.get("code") != 11000]
+        if other_errors:
+            raise
+
+        inserted = bwe.details.get("nInserted", 0)
+        logger.warning(
+            "save_277_file: %d duplicate 277 record(s) rejected for %s/%s",
+            len(duplicate_errors),
+            source,
+            source_filename,
+        )
+        return inserted
+
+
+def save_999_file(source: str, source_filename: str, parsed: dict) -> int:
+    """Persist each 999 acknowledgment entry from a parsed 999 file as a Mongo document."""
+    ack_entries: list[dict] = parsed.get("acknowledgments", []) or parsed.get("flat_rows", []) or []
+    file_type: str = parsed.get("file_type", "")
+    envelope: dict = parsed.get("envelope", {})
+
+    col = _999_collection()
+    docs: list[dict] = []
+
+    for ack_index, entry in enumerate(ack_entries, start=1):
+        doc = {
+            "source": source,
+            "source_filename": source_filename,
+            "ack_index": ack_index,
+            "imported_at": datetime.now(timezone.utc).isoformat(),
+            "file_type": file_type,
+            "envelope": envelope,
+            "ack": entry,
+        }
+        docs.append(doc)
+
+    if not docs:
+        return 0
+
+    try:
+        result = col.insert_many(docs, ordered=False)
+        return len(result.inserted_ids)
+    except BulkWriteError as bwe:
+        write_errors = bwe.details.get("writeErrors", [])
+        duplicate_errors = [e for e in write_errors if e.get("code") == 11000]
+        other_errors = [e for e in write_errors if e.get("code") != 11000]
+        if other_errors:
+            raise
+
+        inserted = bwe.details.get("nInserted", 0)
+        logger.warning(
+            "save_999_file: %d duplicate 999 acknowledgment(s) rejected for %s/%s",
+            len(duplicate_errors),
+            source,
+            source_filename,
         )
         return inserted

@@ -29,7 +29,11 @@ from .parser import parse_835_text
 # Make the pipeline package importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from pipeline import poller  # noqa: E402
-from pipeline.mongo_save import init_era_collection  # noqa: E402
+from pipeline.mongo_save import (  # noqa: E402
+    init_era_collection,
+    init_277_collection,
+    init_999_collection,
+)
 
 
 _log = logging.getLogger("app.main")
@@ -55,6 +59,14 @@ async def lifespan(app: FastAPI):
         init_era_collection()
     except Exception:
         _log.error("Failed to create era_payments unique index", exc_info=True)
+    try:
+        init_277_collection()
+    except Exception:
+        _log.error("Failed to create claim_status_277 unique index", exc_info=True)
+    try:
+        init_999_collection()
+    except Exception:
+        _log.error("Failed to create functional_ack_999 unique index", exc_info=True)
     task = asyncio.create_task(_run_poller())
     _log.info("Pipeline poller task created — polling every %ss",
               os.getenv("SFTP_POLL_INTERVAL_SECONDS", "60"))
