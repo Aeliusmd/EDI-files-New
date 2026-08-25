@@ -60,3 +60,11 @@ pnpm-debug.log*
 
 # Local scratch files
 /aaaaahgshd.png
+
+# 277 / 999 local-only scratch (not production code)
+sample-files/_tmp_sftp_samples/
+scripts/_reload_277_999.py
+scripts/_setup_mongo_277_999_db.py
+scripts/_process_20_mongo_then_sql.py
+scripts/_make_277_999_explain_pdf.py
+scripts/_make_277_999_pdf.py
