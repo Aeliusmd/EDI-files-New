@@ -25,6 +25,7 @@ from .db import init_db, is_enabled, save_parsed_result
 from .era_router import router as era_router
 from .mongo_refresh import init_refresh_store
 from .parser import parse_835_text
+from .parser_277_999 import parse_277_text, parse_999_text
 
 # Make the pipeline package importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -105,27 +106,51 @@ def root():
             "POST /api/auth/token",
             "POST /api/auth/refresh",
             "POST /api/edi/parse",
+            "POST /api/edi/277/parse",
+            "POST /api/edi/999/parse",
             "POST /api/edi/export/json",
             "POST /api/edi/export/csv",
             "POST /api/edi/export/excel",
+            "POST /api/edi/277/export/{json|csv|excel}",
+            "POST /api/edi/999/export/{json|csv|excel}",
             "POST /api/edi/save",
             "GET  /api/era/lookup?trace_number=...  (Bearer access token)",
         ],
     }
 
 
-def ensure_835_file(file: UploadFile) -> None:
+def ensure_edi_extension(file: UploadFile, extensions: set[str], label: str) -> None:
     name = (file.filename or "").lower()
-    if not (name.endswith(".835") or name.endswith(".edi") or name.endswith(".txt")):
-        raise HTTPException(status_code=400, detail="Please upload a .835, .edi, or .txt EDI file.")
+    if not any(name.endswith(ext) for ext in extensions):
+        allowed = ", ".join(sorted(extensions))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Please upload a {label} file ({allowed}).",
+        )
+
+
+def ensure_835_file(file: UploadFile) -> None:
+    ensure_edi_extension(file, {".835", ".edi", ".txt"}, ".835 / .edi / .txt EDI")
+
+
+def ensure_277_file(file: UploadFile) -> None:
+    ensure_edi_extension(file, {".277"}, ".277")
+
+
+def ensure_999_file(file: UploadFile) -> None:
+    ensure_edi_extension(file, {".999"}, ".999")
+
+
+async def read_upload_text(file: UploadFile) -> str:
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    return content.decode("utf-8", errors="ignore")
 
 
 async def read_and_parse(file: UploadFile) -> dict:
     ensure_835_file(file)
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    text = content.decode("utf-8", errors="ignore")
+    text = await read_upload_text(file)
     try:
         return parse_835_text(text)
     except ValueError as exc:
@@ -134,23 +159,35 @@ async def read_and_parse(file: UploadFile) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to parse EDI file: {exc}") from exc
 
 
-@app.post("/api/edi/parse")
-async def parse_edi(file: UploadFile = File(...)):
-    parsed = await read_and_parse(file)
-    return JSONResponse(parsed)
+async def read_and_parse_277(file: UploadFile) -> dict:
+    ensure_277_file(file)
+    text = await read_upload_text(file)
+    try:
+        return parse_277_text(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to parse 277 file: {exc}") from exc
 
 
-@app.post("/api/edi/save")
-async def save_edi(file: UploadFile = File(...)):
-    parsed = await read_and_parse(file)
-    result = save_parsed_result(file.filename or "uploaded.835", parsed)
-    return {"success": bool(result.get("enabled")), "database": result}
+async def read_and_parse_999(file: UploadFile) -> dict:
+    ensure_999_file(file)
+    text = await read_upload_text(file)
+    try:
+        return parse_999_text(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to parse 999 file: {exc}") from exc
 
 
-@app.post("/api/edi/export/{format_name}")
-async def export_edi(format_name: Literal["json", "csv", "excel"], file: UploadFile = File(...)):
-    parsed = await read_and_parse(file)
-    safe_base = os.path.splitext(os.path.basename(file.filename or "edi_835_output"))[0]
+def build_export_response(
+    format_name: Literal["json", "csv", "excel"],
+    parsed: dict,
+    filename: str,
+    rows_sheet_name: str,
+) -> StreamingResponse:
+    safe_base = os.path.splitext(os.path.basename(filename or "edi_output"))[0]
 
     if format_name == "json":
         payload = json.dumps(parsed, indent=2, ensure_ascii=False).encode("utf-8")
@@ -177,9 +214,8 @@ async def export_edi(format_name: Literal["json", "csv", "excel"], file: UploadF
         envelope_df = pd.DataFrame([parsed.get("envelope", {})])
         summary_df.to_excel(writer, sheet_name="Summary", index=False)
         envelope_df.to_excel(writer, sheet_name="Envelope", index=False)
-        df.to_excel(writer, sheet_name="Claim Service Lines", index=False)
+        df.to_excel(writer, sheet_name=rows_sheet_name, index=False)
 
-        # Auto-size columns for readability.
         for worksheet in writer.book.worksheets:
             for column_cells in worksheet.columns:
                 length = max(len(str(cell.value or "")) for cell in column_cells)
@@ -191,3 +227,46 @@ async def export_edi(format_name: Literal["json", "csv", "excel"], file: UploadF
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{safe_base}.xlsx"'},
     )
+
+
+@app.post("/api/edi/parse")
+async def parse_edi(file: UploadFile = File(...)):
+    parsed = await read_and_parse(file)
+    return JSONResponse(parsed)
+
+
+@app.post("/api/edi/277/parse")
+async def parse_edi_277(file: UploadFile = File(...)):
+    parsed = await read_and_parse_277(file)
+    return JSONResponse(parsed)
+
+
+@app.post("/api/edi/999/parse")
+async def parse_edi_999(file: UploadFile = File(...)):
+    parsed = await read_and_parse_999(file)
+    return JSONResponse(parsed)
+
+
+@app.post("/api/edi/save")
+async def save_edi(file: UploadFile = File(...)):
+    parsed = await read_and_parse(file)
+    result = save_parsed_result(file.filename or "uploaded.835", parsed)
+    return {"success": bool(result.get("enabled")), "database": result}
+
+
+@app.post("/api/edi/export/{format_name}")
+async def export_edi(format_name: Literal["json", "csv", "excel"], file: UploadFile = File(...)):
+    parsed = await read_and_parse(file)
+    return build_export_response(format_name, parsed, file.filename or "edi_835_output", "Claim Service Lines")
+
+
+@app.post("/api/edi/277/export/{format_name}")
+async def export_edi_277(format_name: Literal["json", "csv", "excel"], file: UploadFile = File(...)):
+    parsed = await read_and_parse_277(file)
+    return build_export_response(format_name, parsed, file.filename or "edi_277_output", "Claim Status Records")
+
+
+@app.post("/api/edi/999/export/{format_name}")
+async def export_edi_999(format_name: Literal["json", "csv", "excel"], file: UploadFile = File(...)):
+    parsed = await read_and_parse_999(file)
+    return build_export_response(format_name, parsed, file.filename or "edi_999_output", "Functional Acknowledgments")
