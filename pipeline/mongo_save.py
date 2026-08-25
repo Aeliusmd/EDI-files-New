@@ -15,6 +15,8 @@ load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB = os.getenv("MONGO_DB", "edi835")
+# 277/999 live in their own database on the same Mongo connection.
+MONGO_277_999_DB = os.getenv("MONGO_277_999_DB", "edi_277_999")
 ERA_COLLECTION = "era_payments"
 CLAIM_STATUS_277_COLLECTION = os.getenv(
     "MONGO_277_COLLECTION", "claim_status_277"
@@ -26,22 +28,22 @@ FUNCTIONAL_ACK_999_COLLECTION = os.getenv(
 logger = logging.getLogger("pipeline.mongo_save")
 
 
-def _collection(collection_name: str) -> Collection:
+def _collection(collection_name: str, db_name: str | None = None) -> Collection:
     client: MongoClient = MongoClient(MONGO_URI)
-    db = client[MONGO_DB]
+    db = client[db_name or MONGO_DB]
     return db[collection_name]
 
 
 def _era_collection() -> Collection:
-    return _collection(ERA_COLLECTION)
+    return _collection(ERA_COLLECTION, MONGO_DB)
 
 
 def _277_collection() -> Collection:
-    return _collection(CLAIM_STATUS_277_COLLECTION)
+    return _collection(CLAIM_STATUS_277_COLLECTION, MONGO_277_999_DB)
 
 
 def _999_collection() -> Collection:
-    return _collection(FUNCTIONAL_ACK_999_COLLECTION)
+    return _collection(FUNCTIONAL_ACK_999_COLLECTION, MONGO_277_999_DB)
 
 
 def init_era_collection() -> None:

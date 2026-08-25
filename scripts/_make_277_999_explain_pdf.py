@@ -119,10 +119,11 @@ def build():
     s = make_styles()
     story = []
 
-    story.append(Paragraph("277 and 999 Files: Purpose, Parser, MongoDB, and SQL Tables", s["CoverTitle"]))
+    story.append(Paragraph("277 and 999 Files: Purpose, Parser, Auto Polling, MongoDB, and SQL", s["CoverTitle"]))
     story.append(
         Paragraph(
             "Simple explanation of why these files exist, how the custom parser reads them, "
+            "how auto SFTP polling picks up .277 and .999 the same way as .835, "
             "what IK5 means, why one file can create many Mongo documents, and what the "
             "277/999 SQL tables are for.",
             s["Body2"],
@@ -165,7 +166,15 @@ def build():
                 ],
                 [
                     "What is the process?",
-                    "SFTP folder /837P/OUT/ → poller lists .277 and .999 → download → parse by extension → save to Mongo collections claim_status_277 and functional_ack_999. 835 path is unchanged.",
+                    "Same auto poller as 835. SFTP /837P/OUT/ → list .277 and .999 → skip if already in pipeline_tracker → download → parse → save to Mongo edi_277_999. 835 path is unchanged.",
+                ],
+                [
+                    "Is there auto polling for 277/999?",
+                    "Yes. pipeline/poller.py runs when the backend starts. Every SFTP_POLL_INTERVAL_SECONDS (default 60s) it polls Matrix and DMS. In the same cycle as .835 it also processes every new .277 and .999. No separate poller.",
+                ],
+                [
+                    "Is there manual upload for 277/999?",
+                    "Not in the UI today. Manual upload (/api/edi/parse and the frontend) is still 835-only. 277/999 are ingested by auto polling (and optional scripts).",
                 ],
                 [
                     "Is it a full HIPAA validator?",
@@ -173,7 +182,7 @@ def build():
                 ],
                 [
                     "What about SQL tables?",
-                    "277/999 only. Script SQL/Create_Edi277_Edi999_Tables.sql. No 835 tables. Mongo stays the live save; SQL tables are the relational design for the same parsed fields.",
+                    "277/999 only. Script SQL/Create_Edi277_Edi999_Tables.sql (dbo schema). Mongo is the live save from the poller; SQL tables hold the same parsed fields relationally.",
                 ],
             ],
             [2.0 * inch, 5.0 * inch],
@@ -433,39 +442,135 @@ def build():
             "837 = you send the claim.<br/>"
             "999 = file is valid EDI &rarr; custom parser looks for <b>IK5</b>.<br/>"
             "277 = claim status &rarr; custom parser looks for <b>STC</b>.<br/>"
-            "835 = here is the money &rarr; old parser (unchanged).",
+            "835 = here is the money &rarr; old parser (unchanged).<br/>"
+            "Auto poller = same SFTP loop for <b>.835 + .277 + .999</b>.",
             s["Body2"],
         )
     )
 
-    story.append(Paragraph("8. Where it is saved", s["Section"]))
+    story.append(Paragraph("8. Auto SFTP polling for 277 and 999 (same as 835)", s["Section"]))
+    story.append(
+        Paragraph(
+            "When the FastAPI backend starts, it starts <b>one</b> background poller "
+            "(<b>pipeline/poller.py</b>). That poller already handled .835. It now also handles "
+            "<b>.277</b> and <b>.999</b> in the <b>same cycle</b>. The 835 download/parse/save path "
+            "was not redesigned — 277/999 were added beside it.",
+            s["Body2"],
+        )
+    )
+    story.append(Paragraph("How one poll cycle works", s["Sub"]))
+    story.append(
+        bullets(
+            [
+                "Connect to SFTP for each source account (<b>Matrix</b>, <b>DMS</b>) using paramiko.",
+                "Remote folder from env: <b>SFTP_REMOTE_PATH</b> (example: <b>/837P/OUT/</b>).",
+                "List files: <b>.835</b>, then <b>.277</b>, then <b>.999</b>.",
+                "For each file, check Mongo <b>pipeline_tracker</b>. If (source, filename) was already processed, skip it.",
+                "Otherwise download to <b>downloads/&lt;source&gt;/</b>, parse by extension, save to Mongo, then mark seen.",
+                "Sleep <b>SFTP_POLL_INTERVAL_SECONDS</b> (default <b>60</b>) and repeat forever while the app is running.",
+            ],
+            s,
+        )
+    )
+    story.append(
+        table(
+            s,
+            [
+                ["Extension", "Parser", "Save function", "Mongo database / collection"],
+                [".835", "parse_835_text (unchanged)", "save_era_file", "edi_835 / era_payments"],
+                [".277", "parse_277_text", "save_277_file", "edi_277_999 / claim_status_277"],
+                [".999", "parse_999_text", "save_999_file", "edi_277_999 / functional_ack_999"],
+            ],
+            [1.0 * inch, 1.8 * inch, 1.5 * inch, 2.7 * inch],
+        )
+    )
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("Same rules as 835 polling", s["Sub"]))
+    story.append(
+        bullets(
+            [
+                "New files on SFTP are picked up automatically — no manual click required for production ingest.",
+                "Already-seen files are not re-imported (tracker + unique indexes).",
+                "One EDI file can still create many Mongo documents (STC for 277, IK5 for 999), same idea as multiple ERA docs from one .835.",
+                "Empty SFTP user/password for Matrix or DMS skips that account.",
+            ],
+            s,
+        )
+    )
+    story.append(
+        Paragraph(
+            "<b>Manual upload:</b> the website and <b>/api/edi/parse</b> remain <b>835-only</b>. "
+            "There is no UI upload for .277 / .999 yet. Auto polling is the production path for those files.",
+            s["Body2"],
+        )
+    )
+
+    story.append(Paragraph("9. Where it is saved", s["Section"]))
     story.append(
         table(
             s,
             [
                 ["Item", "Value"],
                 ["Mongo host", "10.103.0.201:27017"],
-                ["Database", "edi_835"],
-                ["999 collection", "functional_ack_999"],
+                ["835 database (unchanged)", "edi_835 → era_payments"],
+                ["277/999 database", "edi_277_999"],
                 ["277 collection", "claim_status_277"],
-                ["835 collection (unchanged)", "era_payments"],
+                ["999 collection", "functional_ack_999"],
+                ["Tracker (all types)", "edi_835.pipeline_tracker"],
+                ["Poller code", "pipeline/poller.py (started from backend/app/main.py)"],
                 ["SQL script (277/999 only)", "SQL/Create_Edi277_Edi999_Tables.sql"],
-                ["SQL schema", "edi (database edi_835)"],
-                ["SQL 277 tables", "edi.Edi277File + edi.Edi277Status"],
-                ["SQL 999 tables", "edi.Edi999File + edi.Edi999Ack + error/context children"],
+                ["SQL database / schema", "ClaudMD_Development_Sithum / dbo"],
+                ["SQL 277 tables", "dbo.Edi277File + dbo.Edi277Status"],
+                ["SQL 999 tables", "dbo.Edi999File + dbo.Edi999Ack + error/context children"],
             ],
             [2.3 * inch, 4.7 * inch],
         )
     )
 
-    story.append(PageBreak())
-    story.append(Paragraph("9. MongoDB structure after processing (current parser)", s["Section"]))
+    story.append(Paragraph("How to connect to each database (short)", s["Sub"]))
     story.append(
         Paragraph(
-            "Host <b>10.103.0.201:27017</b>, database <b>edi_835</b>. "
-            "277 and 999 collections are filled only by <b>parse_277_text</b> / <b>parse_999_text</b> "
-            "in <b>backend/app/parser_277_999.py</b>. The 835 collection is not changed. "
-            "Existing 277/999 Mongo documents were deleted and re-inserted with this parser so Compass matches the fields below.",
+            "Settings live in <b>backend/.env</b>. Do not put passwords in shared docs — use your local .env / SSMS login.",
+            s["Body2"],
+        )
+    )
+    story.append(
+        table(
+            s,
+            [
+                ["Store", "How to connect (short)"],
+                [
+                    "MongoDB (835 + tracker)",
+                    "Host 10.103.0.201 port 27017. URI: mongodb://10.103.0.201:27017 — database edi_835. Env: MONGO_URI, MONGO_DB. Compass: same host/port, DB edi_835.",
+                ],
+                [
+                    "MongoDB (277 / 999)",
+                    "Same Mongo server/URI. Separate database edi_277_999. Env: MONGO_277_999_DB. Collections claim_status_277 and functional_ack_999.",
+                ],
+                [
+                    "SQL Server (277 / 999 tables)",
+                    "Server 10.103.0.211. Database ClaudMD_Development_Sithum. Driver ODBC Driver 17 for SQL Server. Schema dbo. SSMS: Server name 10.103.0.211 → DB ClaudMD_Development_Sithum → Tables dbo.Edi277* / dbo.Edi999*.",
+                ],
+                [
+                    "SFTP (file source, not a DB)",
+                    "Host Secure.edidrop.com port 522. Path /837P/OUT/. Accounts Matrix and DMS from SFTP_* env vars. Poller uses paramiko.",
+                ],
+                [
+                    "Optional MySQL (835 manual save only)",
+                    "Only if MYSQL_URL is set in backend/.env for /api/edi/save. Not used for 277/999 polling.",
+                ],
+            ],
+            [1.8 * inch, 5.2 * inch],
+        )
+    )
+
+    story.append(PageBreak())
+    story.append(Paragraph("10. MongoDB structure after processing (current parser)", s["Section"]))
+    story.append(
+        Paragraph(
+            "Host <b>10.103.0.201:27017</b>, database <b>edi_277_999</b> for 277/999. "
+            "Collections are filled by the <b>auto poller</b> using <b>parse_277_text</b> / <b>parse_999_text</b> "
+            "in <b>backend/app/parser_277_999.py</b>. The 835 collection in <b>edi_835.era_payments</b> is not changed.",
             s["Body2"],
         )
     )
@@ -617,19 +722,20 @@ def build():
     )
 
     story.append(PageBreak())
-    story.append(Paragraph("10. SQL tables (277 and 999 only — not 835)", s["Section"]))
+    story.append(Paragraph("11. SQL tables (277 and 999 only — not 835)", s["Section"]))
     story.append(
         Paragraph(
-            "MongoDB is what the poller writes today. The SQL tables are a <b>relational copy of the same 277/999 "
-            "parsed fields</b> so the data can also live in SQL Server (same idea as MySQL tables: one file row, "
-            "many status/ack child rows). They are <b>not</b> 835 / ERA tables. Do not run the old 835 drop-and-create script.",
+            "MongoDB is what the <b>auto poller</b> writes today (<b>edi_277_999</b>). The SQL tables are a "
+            "<b>relational copy of the same 277/999 parsed fields</b> so the data can also live in SQL Server. "
+            "They are <b>not</b> 835 / ERA tables.",
             s["Body2"],
         )
     )
     story.append(
         Paragraph(
             "Create script: <b>SQL/Create_Edi277_Edi999_Tables.sql</b> (SSMS / SQL Server syntax). "
-            "Database <b>edi_835</b>, schema <b>edi</b>. The script does not drop existing rows and does not change Mongo.",
+            "Database <b>ClaudMD_Development_Sithum</b>, schema <b>dbo</b>. The script does not drop existing rows "
+            "and does not change Mongo.",
             s["Body2"],
         )
     )
@@ -641,7 +747,7 @@ def build():
                 ["What they store", "Parsed 277 claim status and 999 acknowledgments — same fields as Mongo"],
                 ["What they do not store", "835 payments, ERA, ClearingHouse835, raw EDI text"],
                 ["How to create", "Open the script in SSMS and run (F5)"],
-                ["Live ingest today", "Still Mongo collections claim_status_277 and functional_ack_999"],
+                ["Live ingest today", "Auto poller → Mongo edi_277_999 (claim_status_277 / functional_ack_999)"],
             ],
             [2.3 * inch, 4.7 * inch],
         )
@@ -777,7 +883,7 @@ def build():
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.HexColor("#666666"))
-        canvas.drawString(0.75 * inch, 0.45 * inch, "277 / 999 explanation — purpose, IK5, Mongo, SQL tables")
+        canvas.drawString(0.75 * inch, 0.45 * inch, "277 / 999 explanation — polling, parser, Mongo, SQL")
         canvas.drawRightString(letter[0] - 0.75 * inch, 0.45 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -788,7 +894,7 @@ def build():
         rightMargin=0.7 * inch,
         topMargin=0.65 * inch,
         bottomMargin=0.7 * inch,
-        title="277 and 999 Explanation (Mongo and SQL tables)",
+        title="277 and 999 Explanation (auto polling, Mongo, SQL)",
         author="EDI 835 Converter",
     )
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
