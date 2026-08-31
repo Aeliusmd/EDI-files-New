@@ -10,3 +10,4 @@ pymongo==4.7.2
 PyJWT==2.10.1
 paramiko>=3.4
 requests>=2.31
+pyodbc>=5.1

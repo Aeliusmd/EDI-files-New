@@ -26,6 +26,7 @@ from .sftp_client import (
 )
 from .tracker import init_tracker, is_seen, mark_seen
 from .mongo_save import save_era_file, save_277_file, save_999_file
+from .sql_sync import is_sql_sync_enabled, sync_277_file_to_sql, sync_999_file_to_sql
 
 SFTP_HOST = os.getenv("SFTP_HOST", "Secure.edidrop.com")
 SFTP_PORT = int(os.getenv("SFTP_PORT", "522"))
@@ -78,6 +79,17 @@ def _poll_source(src: dict) -> int:
             text = local_path.read_text(encoding="utf-8", errors="ignore")
             parsed = parse_277_text(text)
             count = save_277_file(src["name"], filename, parsed)
+            if count and is_sql_sync_enabled():
+                try:
+                    sync_277_file_to_sql(src["name"], filename, parsed)
+                except Exception as exc:
+                    logger.error(
+                        "SQL sync failed for 277 %s/%s: %s",
+                        src["name"],
+                        filename,
+                        exc,
+                        exc_info=True,
+                    )
             mark_seen(src["name"], filename)
             saved += count
             logger.info("Saved %d 277 claim-status records from %s/%s", count, src["name"], filename)
@@ -89,6 +101,17 @@ def _poll_source(src: dict) -> int:
             text = local_path.read_text(encoding="utf-8", errors="ignore")
             parsed = parse_999_text(text)
             count = save_999_file(src["name"], filename, parsed)
+            if count and is_sql_sync_enabled():
+                try:
+                    sync_999_file_to_sql(src["name"], filename, parsed)
+                except Exception as exc:
+                    logger.error(
+                        "SQL sync failed for 999 %s/%s: %s",
+                        src["name"],
+                        filename,
+                        exc,
+                        exc_info=True,
+                    )
             mark_seen(src["name"], filename)
             saved += count
             logger.info("Saved %d 999 acknowledgment records from %s/%s", count, src["name"], filename)

@@ -2,3 +2,4 @@ paramiko>=3.4
 pymongo>=4.6
 python-dotenv>=1.0
 requests>=2.31
+pyodbc>=5.1
