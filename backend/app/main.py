@@ -30,6 +30,7 @@ from .parser_277_999 import parse_277_text, parse_999_text
 # Make the pipeline package importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from pipeline import poller  # noqa: E402
+from pipeline.logging_setup import setup_project_logging  # noqa: E402
 from pipeline.mongo_save import (  # noqa: E402
     init_era_collection,
     init_277_collection,
@@ -51,6 +52,8 @@ async def _run_poller() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_path = setup_project_logging()
+    _log.info("File logging enabled at %s", log_path)
     init_db()
     try:
         init_refresh_store()
